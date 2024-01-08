@@ -24,7 +24,8 @@ bool handleStaticFile(const char *);
 void handleJSON();
 
 struct Config {
-  unsigned int universe;
+  unsigned int universeI2S;
+  unsigned int universeUART;
   unsigned int channels;
   unsigned int delay;
 };

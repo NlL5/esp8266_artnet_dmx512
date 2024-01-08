@@ -1,5 +1,6 @@
 {
-"universe": 1,
+"universeI2S": 1,
+"universeUART": 2,
 "channels": 512,
 "delay": 25
 }

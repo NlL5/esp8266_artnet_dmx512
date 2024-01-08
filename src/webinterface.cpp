@@ -3,6 +3,8 @@
 #include <ESP8266WebServer.h>
 #include <WiFiUdp.h>
 #include <FS.h>
+#include <LittleFS.h>
+#define SPIFFS LittleFS
 
 #include "webinterface.h"
 
@@ -34,7 +36,8 @@ static String getContentType(const String& path) {
 /***************************************************************************/
 
 bool initialConfig() {
-  config.universe = 1;
+  config.universeI2S = 1;
+  config.universeUART = 2;
   config.channels = 512;
   config.delay = 25;
   return true;
@@ -43,7 +46,7 @@ bool initialConfig() {
 bool loadConfig() {
   Serial.println("loadConfig");
 
-  File configFile = SPIFFS.open("/config.json", "r");
+  File configFile = LittleFS.open("/config.json", "r");
   if (!configFile) {
     Serial.println("Failed to open config file");
     return false;
@@ -67,7 +70,8 @@ bool loadConfig() {
     return false;
   }
 
-  JSON_TO_CONFIG(universe, "universe");
+  JSON_TO_CONFIG(universeI2S, "universeI2S");
+  JSON_TO_CONFIG(universeUART, "universeUART");
   JSON_TO_CONFIG(channels, "channels");
   JSON_TO_CONFIG(delay, "delay");
 
@@ -78,11 +82,12 @@ bool saveConfig() {
   Serial.println("saveConfig");
   DynamicJsonDocument root(300);
 
-  CONFIG_TO_JSON(universe, "universe");
+  CONFIG_TO_JSON(universeI2S, "universeI2S");
+  CONFIG_TO_JSON(universeUART, "universeUART");
   CONFIG_TO_JSON(channels, "channels");
   CONFIG_TO_JSON(delay, "delay");
 
-  File configFile = SPIFFS.open("/config.json", "w");
+  File configFile = LittleFS.open("/config.json", "w");
   if (!configFile) {
     Serial.println("Failed to open config file for writing");
     return false;
@@ -132,7 +137,7 @@ void handleUpdate2() {
 void handleDirList() {
   Serial.println("handleDirList");
   String str = "";
-  Dir dir = SPIFFS.openDir("/");
+  Dir dir = LittleFS.openDir("/");
   while (dir.next()) {
     str += dir.fileName();
     str += " ";
@@ -144,7 +149,7 @@ void handleDirList() {
 
 void handleNotFound() {
   Serial.println("handleNotFound");
-  if (SPIFFS.exists(server.uri())) {
+  if (LittleFS.exists(server.uri())) {
     handleStaticFile(server.uri());
   }
   else {
@@ -177,15 +182,15 @@ void handleRedirect(const char * filename) {
 
 bool handleStaticFile(String path) {
   Serial.println("handleStaticFile " + path);
-  String contentType = getContentType(path);            // Get the MIME type
-  if (SPIFFS.exists(path)) {                            // If the file exists
-    File file = SPIFFS.open(path, "r");                 // Open it
-    size_t sent = server.streamFile(file, contentType); // And send it to the client
-    file.close();                                       // Then close the file again
+  String contentType = getContentType(path);              // Get the MIME type
+  if (LittleFS.exists(path)) {                            // If the file exists
+    File file = LittleFS.open(path, "r");                 // Open it
+    server.streamFile(file, contentType);                 // And send it to the client
+    file.close();                                         // Then close the file again
     return true;
   }
   Serial.println("\tFile Not Found");
-  return false;                                         // If the file doesn't exist, return false
+  return false;                                           // If the file doesn't exist, return false
 }
 
 bool handleStaticFile(const char * path) {
@@ -216,14 +221,16 @@ void handleJSON() {
       handleStaticFile("/reload_failure.html");
       return;
     }
-    JSON_TO_CONFIG(universe, "universe");
+    JSON_TO_CONFIG(universeI2S, "universeI2S");
+    JSON_TO_CONFIG(universeUART, "universeUART");
     JSON_TO_CONFIG(channels, "channels");
     JSON_TO_CONFIG(delay, "delay");
     handleStaticFile("/reload_success.html");
   }
   else {
     // parse it as key1=val1&key2=val2&key3=val3
-    KEYVAL_TO_CONFIG(universe, "universe");
+    KEYVAL_TO_CONFIG(universeI2S, "universeI2S");
+    KEYVAL_TO_CONFIG(universeUART, "universeUART");
     KEYVAL_TO_CONFIG(channels, "channels");
     KEYVAL_TO_CONFIG(delay, "delay");
     handleStaticFile("/reload_success.html");

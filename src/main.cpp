@@ -21,6 +21,8 @@
 #include <ArtnetWifi.h>          // https://github.com/rstephan/ArtnetWifi
 #include <ArduinoJson.h>
 #include <FS.h>
+#include <LittleFS.h>
+#define SPIFFS LittleFS
 
 #include "rgb_led.h"
 #include "webinterface.h"
@@ -57,7 +59,7 @@
 // Consider setting also a password in standalone mode, otherwise someone else might
 // configure your device to connect to a random Wifi.
 //#define ENABLE_STANDALONE
-//#define STANDALONE_PASSWORD "wifisecret"
+#define STANDALONE_PASSWORD "93485oisufdg"
 
 // Enable OTA (over the air programming in the Arduino GUI, not via the web server)
 //#define ENABLE_ARDUINO_OTA
@@ -70,6 +72,17 @@
 // Enable multicast DNS, which resolves hostnames to IP addresses within small networks
 // that do not include a local name server
 #define ENABLE_MDNS
+
+/*********************************************************************************/
+
+#ifdef ENABLE_I2S
+// Reverse byte order because DMX expects LSB first but I2S sends MSB first.
+byte flipByte(byte c) {
+  c = ((c >> 1) & 0b01010101) | ((c << 1) & 0b10101010);
+  c = ((c >> 2) & 0b00110011) | ((c << 2) & 0b11001100);
+  return (c >> 4) | (c << 4);
+}
+#endif // ENABLE_I2S
 
 /*********************************************************************************/
 
@@ -144,7 +157,8 @@ float fps = 0;
 
 // Global buffer with one Artnet universe
 struct  {
-  uint16_t universe;
+  uint16_t universeI2S;
+  uint16_t universeUART;
   uint16_t length;
   uint8_t sequence;
 #ifdef ENABLE_UART
@@ -197,13 +211,14 @@ void onDmxPacket(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t *
     Serial.print(", length = ");          Serial.print(length);
     Serial.print(", sequence = ");        Serial.print(sequence);
     Serial.print(", universe = ");        Serial.print(universe);
-    Serial.print(", config.universe = "); Serial.print(universe);
+    Serial.print(", config.universeI2S = "); Serial.print(config.universeI2S);
+    Serial.print(", config.universeUART = "); Serial.print(config.universeUART);
     Serial.println();
   }
 
-  if (universe == config.universe) {
+  if (universe == config.universeI2S) {
     // copy the data from the UDP packet
-    global.universe = universe;
+    global.universeI2S = universe;
     global.sequence = sequence;
 
 #ifdef ENABLE_I2S
@@ -230,7 +245,11 @@ void onDmxPacket(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t *
       global.i2s_data.dmx_bytes[i + 1] = (hi << 8) | lo;
     }
 #endif
+  }
 
+  if (universe == config.universeUART) {
+    global.universeUART = universe;
+    global.sequence = sequence;
 #ifdef ENABLE_UART
     if (length <= 512)
       global.length = length;
@@ -260,7 +279,8 @@ void setup() {
   Serial1.begin(250000, SERIAL_8N2);
 #endif
 
-  global.universe = 0;
+  global.universeI2S = 0;
+  global.universeUART = 0;
   global.sequence = 0;
   global.length = 512;
 
@@ -304,8 +324,8 @@ void setup() {
   //memset(&data, 0b01010101, sizeof(data));
 #endif
 
-  // The SPIFFS file system contains the html and javascript code for the web interface
-  SPIFFS.begin();
+  // The LittleFS file system contains the html and javascript code for the web interface
+  LittleFS.begin();
 
   Serial.println("Loading configuration");
   initialConfig();
@@ -333,6 +353,11 @@ void setup() {
 
   WiFi.hostname(host);
   wifiManager.setAPStaticIPConfig(IPAddress(192, 168, 1, 1), IPAddress(192, 168, 1, 1), IPAddress(255, 255, 255, 0));
+  wifiManager.setConfigPortalTimeout(120); // Retry to connect every 2 minutes
+  wifiManager.setConfigPortalTimeoutCallback([](void) {
+    Serial.println("Not connected after 120 seconds, restarting ...");
+    ESP.restart();
+  });
 
 #ifdef STANDALONE_PASSWORD
   wifiManager.autoConnect(host, STANDALONE_PASSWORD);
@@ -381,7 +406,8 @@ void setup() {
 
 #ifdef ENABLE_WEBINTERFACE
 
-  // this serves all URIs that can be resolved to a file on the SPIFFS filesystem
+    Serial.println("Setting up Webinterface");
+  // this serves all URIs that can be resolved to a file on the LittleFS filesystem
   server.onNotFound(handleNotFound);
 
   server.on("/", HTTP_GET, []() {
@@ -464,7 +490,8 @@ void setup() {
   server.on("/json", HTTP_GET, [] {
     tic_web = millis();
     DynamicJsonDocument root(300);
-    CONFIG_TO_JSON(universe, "universe");
+    CONFIG_TO_JSON(universeI2S, "universeI2S");
+    CONFIG_TO_JSON(universeUART, "universeUART");
     CONFIG_TO_JSON(channels, "channels");
     CONFIG_TO_JSON(delay, "delay");
     root["version"] = version;
@@ -485,6 +512,7 @@ void setup() {
 
   // start the web server
   server.begin();
+  Serial.println("Started server");
 
 #endif // ifdef ENABLE_WEBINTERFACE
 
@@ -533,6 +561,9 @@ void loop() {
   server.handleClient();
 
   if (WiFi.status() != WL_CONNECTED) {
+    if (now & 1024) {
+      Serial.print("Lost connection..."); // Show about every second
+    }
     ledRed();
     delay(10);
 #ifndef ENABLE_STANDALONE
@@ -577,7 +608,7 @@ void loop() {
 
       Serial1.write(0); // Start-Byte
       // send out the value of the selected channels (up to 512)
-      for (int i = 0; i < MIN(global.length, config.channels); i++) {
+      for (unsigned int i = 0; i < MIN(global.length, config.channels); i++) {
         Serial1.write(global.uart_data[i]);
       }
 
@@ -614,17 +645,6 @@ void loop() {
 #endif
 
 } // loop
-
-/*********************************************************************************/
-
-#ifdef ENABLE_I2S
-// Reverse byte order because DMX expects LSB first but I2S sends MSB first.
-byte flipByte(byte c) {
-  c = ((c >> 1) & 0b01010101) | ((c << 1) & 0b10101010);
-  c = ((c >> 2) & 0b00110011) | ((c << 2) & 0b11001100);
-  return (c >> 4) | (c << 4);
-}
-#endif // ENABLE_I2S
 
 /*********************************************************************************/
 
