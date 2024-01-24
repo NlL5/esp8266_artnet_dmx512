@@ -108,10 +108,9 @@ byte flipByte(byte c) {
 #include <NeoPixelBus.h>
 
 unsigned long strobeStartMillis = 0;
-unsigned int strobeFlashDuration = 50; // Dauer jedes Blitzes in Millisekunden
 boolean strobeState = HIGH;
 
-NeoPixelBus<NeoGrbFeature, NeoWs2812xMethod> strip(55);
+NeoPixelBus<NEO_FEATURE, NEO_METHOD> strip(NEO_PIXELS);
 #endif
 
 /*********************************************************************************/
@@ -688,20 +687,23 @@ void loop() {
       if (global.led_strip_data[3] > 8) {
         unsigned long currentMillis = millis();
 
-        uint16_t delay = 25 + 0xff - global.led_strip_data[3]; // min of 25 ms delay
+        uint16_t blackDuration = 20 + 0xff - global.led_strip_data[3]; // min of 25 ms delay
+        uint16_t lightDuraction = MIN(50, blackDuration); // not linear, but ok I think
 
         if (strobeState == HIGH && strobeStartMillis == 0) {
           // Start the strobe
           strobeStartMillis = currentMillis;
-        } else if (strobeState == HIGH && currentMillis - strobeStartMillis >= strobeFlashDuration) {
+        } else if (strobeState == HIGH && currentMillis - strobeStartMillis >= lightDuraction) {
           // Turn from high to low
           strobeState = LOW;
           strobeStartMillis = currentMillis;
-        } else if (strobeState == LOW && currentMillis - strobeStartMillis >= delay) {
+        } else if (strobeState == LOW && currentMillis - strobeStartMillis >= blackDuration) {
+          // Turn from low to high
           strobeState = HIGH;
           strobeStartMillis = currentMillis;
         }
       } else {
+        // Stop the strobe
         strobeState = HIGH;
         strobeStartMillis = 0;
       }
