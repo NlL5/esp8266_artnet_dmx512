@@ -39,7 +39,7 @@ bool initialConfig() {
   config.universeI2S = 1;
   config.universeUART = 2;
   config.channels = 512;
-  config.delay = 25;
+  config.delay = 10;
   return true;
 }
 

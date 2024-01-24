@@ -28,6 +28,7 @@ struct Config {
   unsigned int universeUART;
   unsigned int channels;
   unsigned int delay;
+  unsigned int led_start;
 };
 
 #endif // _WEBINTERFACE_H_

@@ -36,7 +36,7 @@
 // This is the original way this sketch used to work and expects the max485 level
 // shifter to be connected to the pin that corresponds to Serial1.
 // On a Wemos D1 this is pin D4 aka TX1.
-#define ENABLE_UART
+//#define ENABLE_UART
 
 // Uncomment to send DMX data via I2S instead of UART.
 // I2S allows for better control of number of stop bits and DMX timing to meet the
@@ -45,7 +45,10 @@
 // However - because of the extra timing/pauses for sloppy device, sending DMX over I2S
 // will cause throughput to drop from approx 40 packets/s to around 30.
 // On a Wemos D1 I2S is available on pin RX0.
-#define ENABLE_I2S
+//#define ENABLE_I2S
+
+// Uncomment following for RGB strip
+#define ENABLE_LED_STRIP
 
 // Enable kind of unit test for new I2S code moving around a knowingly picky device
 // (china brand moving head with timing issues)
@@ -62,8 +65,8 @@
 #define STANDALONE_PASSWORD "93485oisufdg"
 
 // Enable OTA (over the air programming in the Arduino GUI, not via the web server)
-//#define ENABLE_ARDUINO_OTA
-//#define ARDUINO_OTA_PASSWORD "otasecret"
+#define ENABLE_ARDUINO_OTA
+#define ARDUINO_OTA_PASSWORD "$!mgboq#acPFCiWh3hgBm"
 
 // Enable the web interface that allows to configure the ArtNet universe, the number
 // of channels, etcetera
@@ -98,6 +101,18 @@ byte flipByte(byte c) {
 #define DMX_BREAK 92
 #define DMX_MAB 12
 #endif // ENABLE_UART
+
+/*********************************************************************************/
+
+#ifdef ENABLE_LED_STRIP
+#include <NeoPixelBus.h>
+
+unsigned long strobeStartMillis = 0;
+unsigned int strobeFlashDuration = 50; // Dauer jedes Blitzes in Millisekunden
+boolean strobeState = HIGH;
+
+NeoPixelBus<NeoGrbFeature, NeoWs2812xMethod> strip(55);
+#endif
 
 /*********************************************************************************/
 
@@ -167,6 +182,9 @@ struct  {
 #ifdef ENABLE_I2S
   i2s_packet i2s_data;
   uint16_t i2s_length;
+#endif
+#ifdef ENABLE_LED_STRIP
+  uint8_t led_strip_data[512];
 #endif
 } global;
 
@@ -258,6 +276,18 @@ void onDmxPacket(uint16_t universe, uint16_t length, uint8_t sequence, uint8_t *
     }
 #endif
   }
+
+  if (universe == config.universeUART) {
+    global.universeUART = universe;
+    global.sequence = sequence;
+#ifdef ENABLE_LED_STRIP
+    if (length <= 512)
+      global.length = length;
+    for (int i = 0; i < global.length; i++) {
+      global.led_strip_data[i] = data[i];
+    }
+#endif
+  }
 } // onDmxpacket
 
 /*********************************************************************************/
@@ -324,6 +354,24 @@ void setup() {
   //memset(&data, 0b01010101, sizeof(data));
 #endif
 
+#ifdef ENABLE_LED_STRIP
+    RgbColor white(128);
+    RgbColor black(0);
+    strip.Begin();
+    strip.ClearTo(black);
+    strip.SetPixelColor(0, white);
+    strip.Show();
+    delay(100);
+    strip.SetPixelColor(0, black);
+    strip.Show();
+    delay(100);
+    strip.SetPixelColor(0, white);
+    strip.Show();
+    delay(100);
+    strip.SetPixelColor(0, black);
+    strip.Show();
+#endif
+
   // The LittleFS file system contains the html and javascript code for the web interface
   LittleFS.begin();
 
@@ -374,13 +422,11 @@ void setup() {
   ArduinoOTA.setHostname(host);
   ArduinoOTA.setPassword(ARDUINO_OTA_PASSWORD);
   ArduinoOTA.onStart([]() {
-    allBlack();
-    digitalWrite(LED_B, ON);
+    ledBlue();
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
-    allBlack();
-    digitalWrite(LED_R, ON);
+    ledRed();
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     analogWrite(LED_B, 4096 - (20 * millis()) % 4096);
@@ -390,10 +436,9 @@ void setup() {
     }
   });
   ArduinoOTA.onEnd([]()   {
-    allBlack();
-    digitalWrite(LED_G, ON);
+    ledGreen();
     delay(500);
-    allBlack();
+    ledBlack();
   });
   Serial.println("Arduino OTA init complete");
 
@@ -636,6 +681,43 @@ void loop() {
         i2sCounter = 0;
         Serial.printf("I2S: %.1f p/s\n", pps);
       }
+#endif
+
+#ifdef ENABLE_LED_STRIP
+      // Strobe section
+      if (global.led_strip_data[3] > 8) {
+        unsigned long currentMillis = millis();
+
+        uint16_t delay = 25 + 0xff - global.led_strip_data[3]; // min of 25 ms delay
+
+        if (strobeState == HIGH && strobeStartMillis == 0) {
+          // Start the strobe
+          strobeStartMillis = currentMillis;
+        } else if (strobeState == HIGH && currentMillis - strobeStartMillis >= strobeFlashDuration) {
+          // Turn from high to low
+          strobeState = LOW;
+          strobeStartMillis = currentMillis;
+        } else if (strobeState == LOW && currentMillis - strobeStartMillis >= delay) {
+          strobeState = HIGH;
+          strobeStartMillis = currentMillis;
+        }
+      } else {
+        strobeState = HIGH;
+        strobeStartMillis = 0;
+      }
+      
+      // send out the value of the selected channels (up to 512)
+      for (unsigned int i = config.led_start + 4; i < MIN(global.length, config.channels); i=i+3) {
+        unsigned int pixel = (i - config.led_start + 4) / 3;
+
+        uint8_t r = MAX(global.led_strip_data[0], global.led_strip_data[i+0]) * strobeState;
+        uint8_t g = MAX(global.led_strip_data[1], global.led_strip_data[i+1]) * strobeState;
+        uint8_t b = MAX(global.led_strip_data[2], global.led_strip_data[i+2]) * strobeState;
+
+        RgbColor color(r, g, b);
+        strip.SetPixelColor(pixel, color);
+      }
+      strip.Show();
 #endif
     }
   }
