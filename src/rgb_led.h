@@ -7,6 +7,9 @@
 #define LED_G 5   // GPIO05/D1
 #define LED_R 4   // GPIO04/D2
 
+// Uncomment following for RGB strip
+#define ENABLE_LED_STRIP
+
 // #define COMMON_ANODE
 
 void ledInit();
@@ -20,5 +23,6 @@ void ledMagenta();
 void ledCyan();
 
 void ledBlack();
+void ledWhite();
 
 #endif

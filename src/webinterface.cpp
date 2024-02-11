@@ -8,6 +8,10 @@
 
 #include "webinterface.h"
 
+#ifdef NEO_COLOR
+#include <NeoPixelBus.h>
+#endif
+
 extern ESP8266WebServer server;
 extern Config config;
 
@@ -38,8 +42,13 @@ static String getContentType(const String& path) {
 bool initialConfig() {
   config.universeI2S = 1;
   config.universeUART = 2;
+#ifdef NEO_COLOR
+  config.channels = 2 + (1 + NEO_PIXELS) * NEO_COLOR::Count;
+#else
   config.channels = 512;
+#endif
   config.delay = 10;
+  config.firstChannel = 0;
   return true;
 }
 
@@ -73,6 +82,7 @@ bool loadConfig() {
   JSON_TO_CONFIG(universeI2S, "universeI2S");
   JSON_TO_CONFIG(universeUART, "universeUART");
   JSON_TO_CONFIG(channels, "channels");
+  JSON_TO_CONFIG(firstChannel, "firstChannel");
   JSON_TO_CONFIG(delay, "delay");
 
   return true;
@@ -85,6 +95,7 @@ bool saveConfig() {
   CONFIG_TO_JSON(universeI2S, "universeI2S");
   CONFIG_TO_JSON(universeUART, "universeUART");
   CONFIG_TO_JSON(channels, "channels");
+  CONFIG_TO_JSON(firstChannel, "firstChannel");
   CONFIG_TO_JSON(delay, "delay");
 
   File configFile = LittleFS.open("/config.json", "w");
@@ -224,6 +235,7 @@ void handleJSON() {
     JSON_TO_CONFIG(universeI2S, "universeI2S");
     JSON_TO_CONFIG(universeUART, "universeUART");
     JSON_TO_CONFIG(channels, "channels");
+    JSON_TO_CONFIG(firstChannel, "firstChannel");
     JSON_TO_CONFIG(delay, "delay");
     handleStaticFile("/reload_success.html");
   }
@@ -232,6 +244,7 @@ void handleJSON() {
     KEYVAL_TO_CONFIG(universeI2S, "universeI2S");
     KEYVAL_TO_CONFIG(universeUART, "universeUART");
     KEYVAL_TO_CONFIG(channels, "channels");
+    KEYVAL_TO_CONFIG(firstChannel, "firstChannel");
     KEYVAL_TO_CONFIG(delay, "delay");
     handleStaticFile("/reload_success.html");
   }

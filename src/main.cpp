@@ -65,7 +65,7 @@
 #define STANDALONE_PASSWORD "93485oisufdg"
 
 // Enable OTA (over the air programming in the Arduino GUI, not via the web server)
-#define ENABLE_ARDUINO_OTA
+//#define ENABLE_ARDUINO_OTA
 #define ARDUINO_OTA_PASSWORD "$!mgboq#acPFCiWh3hgBm"
 
 // Enable the web interface that allows to configure the ArtNet universe, the number
@@ -354,21 +354,19 @@ void setup() {
 #endif
 
 #ifdef ENABLE_LED_STRIP
-    RgbColor white(128);
     RgbColor black(0);
     strip.Begin();
     strip.ClearTo(black);
-    strip.SetPixelColor(0, white);
     strip.Show();
+    ledWhite();
     delay(100);
-    strip.SetPixelColor(0, black);
-    strip.Show();
+    ledBlack();
     delay(100);
-    strip.SetPixelColor(0, white);
-    strip.Show();
+    ledWhite();
     delay(100);
-    strip.SetPixelColor(0, black);
-    strip.Show();
+    ledBlack();
+    Serial.print("Number of channels per LED: ");
+    Serial.println(NEO_COLOR::Count);
 #endif
 
   // The LittleFS file system contains the html and javascript code for the web interface
@@ -537,6 +535,7 @@ void setup() {
     CONFIG_TO_JSON(universeI2S, "universeI2S");
     CONFIG_TO_JSON(universeUART, "universeUART");
     CONFIG_TO_JSON(channels, "channels");
+    CONFIG_TO_JSON(firstChannel, "firstChannel");
     CONFIG_TO_JSON(delay, "delay");
     root["version"] = version;
     root["uptime"]  = long(millis() / 1000);
@@ -621,7 +620,9 @@ void loop() {
     delay(25);
   }
   else  {
+#ifndef ENABLE_LED_STRIP
     ledGreen();
+#endif
     artnet.read();
 
     // this section gets executed at a maximum rate of around 40Hz
@@ -683,11 +684,22 @@ void loop() {
 #endif
 
 #ifdef ENABLE_LED_STRIP
+      uint8_t dimmer =  global.led_strip_data[0];
+      uint8_t strobe =  global.led_strip_data[1];
+      uint8_t allR =  global.led_strip_data[2];
+      uint8_t allG =  global.led_strip_data[3];
+      uint8_t allB =  global.led_strip_data[4];
+      uint8_t allW =  global.led_strip_data[5]; // compiler will optimize away if unneded
+      uint8_t allC =  global.led_strip_data[6];
+
+      const uint8_t colorChannels = NEO_COLOR::Count;
+      const uint8_t firstLed = 2 + colorChannels;
+
       // Strobe section
-      if (global.led_strip_data[3] > 8) {
+      if (strobe > 8) {
         unsigned long currentMillis = millis();
 
-        uint16_t blackDuration = 20 + 0xff - global.led_strip_data[3]; // min of 25 ms delay
+        uint16_t blackDuration = 20 + 0xff - strobe; // min of 25 ms delay
         uint16_t lightDuraction = MIN(50, blackDuration); // not linear, but ok I think
 
         if (strobeState == HIGH && strobeStartMillis == 0) {
@@ -709,14 +721,23 @@ void loop() {
       }
       
       // send out the value of the selected channels (up to 512)
-      for (unsigned int i = config.led_start + 4; i < MIN(global.length, config.channels); i=i+3) {
-        unsigned int pixel = (i - config.led_start + 4) / 3;
+      for (unsigned int i = config.firstChannel + firstLed; i < MIN(global.length, config.channels); i=i+colorChannels) {
+        unsigned int pixel = (i - config.firstChannel - firstLed) / colorChannels;
 
-        uint8_t r = MAX(global.led_strip_data[0], global.led_strip_data[i+0]) * strobeState;
-        uint8_t g = MAX(global.led_strip_data[1], global.led_strip_data[i+1]) * strobeState;
-        uint8_t b = MAX(global.led_strip_data[2], global.led_strip_data[i+2]) * strobeState;
+        uint8_t r = MAX(allR, global.led_strip_data[i+0]) * strobeState * dimmer / 0xff;
+        uint8_t g = MAX(allG, global.led_strip_data[i+1]) * strobeState * dimmer / 0xff;
+        uint8_t b = MAX(allB, global.led_strip_data[i+2]) * strobeState * dimmer / 0xff;
+        uint8_t w = MAX(allW, global.led_strip_data[i+3]) * strobeState * dimmer / 0xff;
+        uint8_t c = MAX(allC, global.led_strip_data[i+4]) * strobeState * dimmer / 0xff;
 
-        RgbColor color(r, g, b);
+        #if NEO_COLOR == RgbColor
+          NEO_COLOR color(r, g, b);
+        #elif NEO_COLOR == RgbwColor
+          NEO_COLOR color(r, g, b, w);
+        #elif NEO_COLOR == RgbwwColor
+          NEO_COLOR color(r, g, b, w, c);
+        #endif
+
         strip.SetPixelColor(pixel, color);
       }
       strip.Show();
